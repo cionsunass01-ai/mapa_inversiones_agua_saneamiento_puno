@@ -320,7 +320,10 @@ def main():
             min_h, max_h = min(horas), max(horas)
             
             if len(points_list) == 1:
-                geoms_to_add = [eps_geom] if eps_geom.geom_type == 'Polygon' else list(eps_geom.geoms)
+                # bounding_geom para que no sea un punto invisible
+                bounding_geom = points_list[0].buffer(0.01)
+                clip_geom = eps_geom.union(bounding_geom)
+                geoms_to_add = [clip_geom] if clip_geom.geom_type == 'Polygon' else list(clip_geom.geoms)
                 for g in geoms_to_add:
                     voronoi_features.append({
                         'type': 'Feature',
@@ -332,10 +335,15 @@ def main():
                     })
             else:
                 mp = MultiPoint(points_list)
-                regions = voronoi_diagram(mp, envelope=eps_geom)
+                # Como el shapefile de Arequipa tiene poligonos muy pequeños, 
+                # usamos la envolvente convexa de los puntos con un buffer de ~1km para recortar.
+                bounding_geom = mp.convex_hull.buffer(0.01)
+                clip_geom = eps_geom.union(bounding_geom)
+                
+                regions = voronoi_diagram(mp, envelope=clip_geom)
                 
                 for poly in regions.geoms:
-                    clipped = poly.intersection(eps_geom)
+                    clipped = poly.intersection(clip_geom)
                     if clipped.is_empty:
                         continue
                         
