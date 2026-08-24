@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 # Archivos
-CSV_FILE = Path("outputs/proyectos_agua_saneamiento_puno_v6.csv")
+CSV_FILE = Path("outputs/proyectos_agua_saneamiento_puno_v7.csv")
 GPKG_FILE = Path("data/geografia/DISTRITO.gpkg")
 EPS_SHP = Path("/Users/pierotarazona/Downloads/Rodrigo_Puno y Arequipa/EPS_Puno.shp")
 HTML_OUT = Path("outputs/mapa_inversiones_agua_saneamiento_puno.html")
@@ -131,7 +131,25 @@ def main():
         proys_u = df_valid[df_valid['UBIGEO_NORMALIZADO'] == u]
         lista = []
         for _, p in proys_u.iterrows():
-            estado = str(p['ESTADO']) if str(p['ESTADO']) not in ['nan', 'none', 'null', ''] else "NO REGISTRADO"
+            prog_ejec = str(p.get('PROGRAMACION_EJECUCION_0', ''))
+            prog_ejec = format_money(prog_ejec) if prog_ejec not in ['nan', 'none', 'null', ''] else "S/I"
+            
+            prog_ejec_1 = str(p.get('PROGRAMACION_EJECUCION_1', ''))
+            prog_ejec_1 = format_money(prog_ejec_1) if prog_ejec_1 not in ['nan', 'none', 'null', ''] else "S/I"
+            
+            prog_ejec_2 = str(p.get('PROGRAMACION_EJECUCION_2', ''))
+            prog_ejec_2 = format_money(prog_ejec_2) if prog_ejec_2 not in ['nan', 'none', 'null', ''] else "S/I"
+            
+            prog_ejec_3 = str(p.get('PROGRAMACION_EJECUCION_3', ''))
+            prog_ejec_3 = format_money(prog_ejec_3) if prog_ejec_3 not in ['nan', 'none', 'null', ''] else "S/I"
+            
+            ini_ejec = str(p.get('INICIO_EJECUCION_STR', ''))
+            if ini_ejec.lower() in ['nan', 'none', 'null', '']: ini_ejec = "Sin inicio"
+            elif len(ini_ejec) > 10: ini_ejec = ini_ejec[:10]
+            
+            fin_ejec = str(p.get('FIN_EJECUCION_STR', ''))
+            if fin_ejec.lower() in ['nan', 'none', 'null', '']: fin_ejec = "Sin fin"
+            elif len(fin_ejec) > 10: fin_ejec = fin_ejec[:10]
             
             fec = str(p['ULT_FEC_DECLA_ESTIM'])
             if fec.lower() in ['nan', 'none', 'null', '']: fec = ""
@@ -144,7 +162,14 @@ def main():
             lista.append({
                 'cui': str(p['CODIGO_UNICO']),
                 'nombre': str(p['NOMBRE_INVERSION']),
-                'estado': estado,
+                'prog_ejec': prog_ejec,
+                'prog_ejec_1': prog_ejec_1,
+                'prog_ejec_2': prog_ejec_2,
+                'prog_ejec_3': prog_ejec_3,
+                'ini_ejec': ini_ejec,
+                'fin_ejec': fin_ejec,
+                'tiene_eps': str(p.get('TIENE_EPS_PRESTACION', 'NO')),
+                'eps_nombre': str(p.get('EPS_PRESTACION', '')),
                 'monto': format_money(p['MONTO_REFERENCIA']),
                 'ejecutado': format_money(p['PRESUPUESTO_EJECUTADO']),
                 'fisico': p['AVANCE_FISICO_NUM'] if pd.notna(p['AVANCE_FISICO_NUM']) else None,
@@ -488,8 +513,16 @@ def main():
             var p = proys[i];
             html += "<div style='background: white; border: 1px solid #ddd; border-radius: 5px; padding: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); border-left: 4px solid " + p.color_act + ";'>";
             html += "<div style='font-size: 10px; color: #7f8c8d; margin-bottom: 3px;'>CUI: " + p.cui + "</div>";
-            html += "<div style='font-size: 12px; font-weight: bold; margin-bottom: 5px; color: #2c3e50; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis;' title='" + p.nombre + "'>" + p.nombre + "</div>";
-            html += "<div style='font-size: 11px; margin-bottom: 3px;'>Estado: <span style='color: blue; font-weight: bold;'>" + p.estado + "</span></div>";
+            var star = p.tiene_eps === 'SI' ? " ⭐ <span style='font-size:9px; font-weight:normal; color:#8e44ad;'>(" + p.eps_nombre + ")</span>" : "";
+            html += "<div style='font-size: 12px; font-weight: bold; margin-bottom: 5px; color: #2c3e50; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis;' title='" + p.nombre + "'>" + p.nombre + star + "</div>";
+            html += "<div style='font-size: 11px; margin-bottom: 3px;'>Prog. Ejec. Presupuestal:</div>";
+            html += "<ul style='margin: 2px 0 5px 20px; padding: 0; font-size: 10px; color: blue; font-weight: bold;'>";
+            html += "<li>Año 0: " + p.prog_ejec + "</li>";
+            html += "<li>Año 1: " + p.prog_ejec_1 + "</li>";
+            html += "<li>Año 2: " + p.prog_ejec_2 + "</li>";
+            html += "<li>Año 3: " + p.prog_ejec_3 + "</li>";
+            html += "</ul>";
+            html += "<div style='font-size: 11px; margin-bottom: 3px;'>Inicio: <b>" + p.ini_ejec + "</b> | Fin: <b>" + p.fin_ejec + "</b></div>";
             html += "<div style='font-size: 11px; margin-bottom: 3px;'>Monto: <b>" + p.monto + "</b></div>";
             html += "<div style='font-size: 11px; margin-bottom: 6px;'>Ejecutado: <span style='color:#8e44ad; font-weight:bold;'>" + p.ejecutado + "</span></div>";
             
