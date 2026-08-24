@@ -42,6 +42,11 @@ def main():
     gdf_eps = gpd.read_file(EPS_SHP)
     if gdf_eps.crs is None or gdf_eps.crs.to_epsg() != 4326:
         gdf_eps = gdf_eps.to_crs(epsg=4326)
+    
+    # Forzar a 2D para evitar problemas de visualización en Leaflet y recortes de Voronoi
+    from shapely import force_2d
+    gdf_eps['geometry'] = gdf_eps.geometry.apply(force_2d)
+    
     gdf_eps = gdf_eps[['Pres_Sigla', 'geometry']].rename(columns={'Pres_Sigla': 'EPS'})
     
     df['COSTO_ACTUALIZADO'] = pd.to_numeric(df['COSTO_ACTUALIZADO'], errors='coerce')
