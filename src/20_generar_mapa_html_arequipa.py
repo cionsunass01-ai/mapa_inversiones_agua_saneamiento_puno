@@ -305,53 +305,81 @@ def main():
             
         fg_continuidad.add_to(m)
 
-        # Generar capa de Voronoi (Polígonos de Continuidad) relativos a todo Arequipa
+        # Generar capa de Voronoi (Polígonos de Continuidad) relativos a cada EPS
         from shapely.geometry import Point, MultiPoint
         from shapely.ops import voronoi_diagram
         
-        arequipa_geom = gdf_arequipa.union_all()
+        eps_polygons = gdf_eps.dissolve(by='EPS').reset_index()
         
-        points_list = []
-        data_list = []
+        # Asignar cada punto a su EPS más cercano
+        points_data = []
         for _, row in agg_horario.iterrows():
             if not pd.isna(row['latitud']) and not pd.isna(row['longitud']):
-                points_list.append(Point(row['longitud'], row['latitud']))
-                data_list.append(row)
+                pt = Point(row['longitud'], row['latitud'])
+                min_dist = float('inf')
+                best_eps = None
+                for _, eps_row in eps_polygons.iterrows():
+                    dist = eps_row.geometry.distance(pt)
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_eps = eps_row['EPS']
+                points_data.append((pt, row, best_eps))
                 
         voronoi_features = []
-        
-        if len(points_list) > 1:
-            horas = [r['HorasPromedioDia'] for r in data_list]
+        for _, eps_row in eps_polygons.iterrows():
+            eps_geom = eps_row.geometry
+            eps_name = eps_row['EPS']
+            
+            pts_in_eps = [item for item in points_data if item[2] == eps_name]
+            if not pts_in_eps:
+                continue
+                
+            points_list = [item[0] for item in pts_in_eps]
+            data_in_eps = [item[1] for item in pts_in_eps]
+            
+            horas = [r['HorasPromedioDia'] for r in data_in_eps]
             min_h, max_h = min(horas), max(horas)
             
-            mp = MultiPoint(points_list)
-            regions = voronoi_diagram(mp, envelope=arequipa_geom)
-            
-            for poly in regions.geoms:
-                clipped = poly.intersection(arequipa_geom)
-                if clipped.is_empty:
-                    continue
-                    
-                matched_row = None
-                for pt, data in zip(points_list, data_list):
-                    if poly.contains(pt) or poly.distance(pt) < 1e-6:
-                        matched_row = data
-                        break
+            if len(points_list) == 1:
+                geoms_to_add = [eps_geom] if eps_geom.geom_type == 'Polygon' else list(eps_geom.geoms)
+                for g in geoms_to_add:
+                    voronoi_features.append({
+                        'type': 'Feature',
+                        'geometry': g.__geo_interface__,
+                        'properties': {
+                            'HorasPromedioDia': float(data_in_eps[0]['HorasPromedioDia']),
+                            'Relativo': 1.0
+                        }
+                    })
+            else:
+                mp = MultiPoint(points_list)
+                regions = voronoi_diagram(mp, envelope=eps_geom)
+                
+                for poly in regions.geoms:
+                    clipped = poly.intersection(eps_geom)
+                    if clipped.is_empty:
+                        continue
                         
-                if matched_row is not None:
-                    val = matched_row['HorasPromedioDia']
-                    rel_val = 1.0 if min_h == max_h else (val - min_h) / (max_h - min_h)
-                    
-                    geoms_to_add = [clipped] if clipped.geom_type == 'Polygon' else (list(clipped.geoms) if clipped.geom_type == 'MultiPolygon' else [])
-                    for g in geoms_to_add:
-                        voronoi_features.append({
-                            'type': 'Feature',
-                            'geometry': g.__geo_interface__,
-                            'properties': {
-                                'HorasPromedioDia': float(val),
-                                'Relativo': float(rel_val)
-                            }
-                        })
+                    matched_row = None
+                    for pt, data in zip(points_list, data_in_eps):
+                        if poly.contains(pt) or poly.distance(pt) < 1e-6:
+                            matched_row = data
+                            break
+                            
+                    if matched_row is not None:
+                        val = matched_row['HorasPromedioDia']
+                        rel_val = 1.0 if min_h == max_h else (val - min_h) / (max_h - min_h)
+                        
+                        geoms_to_add = [clipped] if clipped.geom_type == 'Polygon' else (list(clipped.geoms) if clipped.geom_type == 'MultiPolygon' else [])
+                        for g in geoms_to_add:
+                            voronoi_features.append({
+                                'type': 'Feature',
+                                'geometry': g.__geo_interface__,
+                                'properties': {
+                                    'HorasPromedioDia': float(val),
+                                    'Relativo': float(rel_val)
+                                }
+                            })
                             
         if voronoi_features:
             voronoi_geojson = {'type': 'FeatureCollection', 'features': voronoi_features}
