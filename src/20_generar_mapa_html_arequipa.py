@@ -217,6 +217,55 @@ def main():
         )
     ).add_to(m)
     
+    # Preparar Capa EPS
+    gdf_eps['TOTAL_POLIGONOS'] = gdf_eps.groupby('EPS')['EPS'].transform('count')
+    df_eps = df[df['TIENE_EPS_PRESTACION'] == 'SI']
+    
+    eps_agg = df_eps.groupby('EPS_PRESTACION').agg(
+        PROYECTOS=('CODIGO_UNICO', 'nunique'),
+        MONTO_TOTAL=('MONTO_REFERENCIA', 'sum'),
+        COORD_OFICIAL=('TIPO_COORDENADA', lambda x: x.str.upper().str.contains('OFICIAL').sum()),
+        COORD_APROX=('TIPO_COORDENADA', lambda x: x.str.upper().str.contains('APROX').sum()),
+        PROY_INVERSION=('TIPO_INVERSION', lambda x: (x.str.upper() == 'PROYECTO DE INVERSIÓN').sum()),
+        IOARR=('TIPO_INVERSION', lambda x: (x.str.upper() == 'IOARR').sum())
+    ).reset_index()
+    
+    gdf_eps_mapa = gdf_eps.merge(eps_agg, left_on='EPS', right_on='EPS_PRESTACION', how='left')
+    gdf_eps_mapa['PROYECTOS'] = gdf_eps_mapa['PROYECTOS'].fillna(0).astype(int)
+    gdf_eps_mapa['PROY_INVERSION'] = gdf_eps_mapa['PROY_INVERSION'].fillna(0).astype(int)
+    gdf_eps_mapa['IOARR'] = gdf_eps_mapa['IOARR'].fillna(0).astype(int)
+    gdf_eps_mapa['COORD_OFICIAL'] = gdf_eps_mapa['COORD_OFICIAL'].fillna(0).astype(int)
+    gdf_eps_mapa['COORD_APROX'] = gdf_eps_mapa['COORD_APROX'].fillna(0).astype(int)
+    gdf_eps_mapa['MONTO_TOTAL'] = gdf_eps_mapa['MONTO_TOTAL'].fillna(0).apply(format_money)
+    
+    # Dynamically assign colors to EPS (using seaborn qualitative palette equivalent)
+    eps_unique = gdf_eps_mapa['EPS'].dropna().unique()
+    colors = ['#8e44ad', '#e74c3c', '#16a085', '#2980b9', '#f39c12', '#d35400', '#27ae60', '#c0392b', '#1abc9c', '#34495e']
+    eps_colors = {eps: colors[i % len(colors)] for i, eps in enumerate(eps_unique)}
+    
+    def eps_style(feature):
+        eps_name = feature['properties'].get('EPS', '')
+        col = eps_colors.get(eps_name, '#34495e')
+        return {
+            'fillColor': col,
+            'color': col,
+            'weight': 2,
+            'fillOpacity': 0.35,
+            'dashArray': '4'
+        }
+        
+    folium.GeoJson(
+        gdf_eps_mapa,
+        name='Ámbito de prestación EPS',
+        style_function=eps_style,
+        tooltip=folium.GeoJsonTooltip(
+            fields=['EPS', 'TOTAL_POLIGONOS', 'PROYECTOS', 'MONTO_TOTAL', 'PROY_INVERSION', 'IOARR', 'COORD_OFICIAL', 'COORD_APROX'],
+            aliases=['EPS:', 'Polígonos asociados:', 'Proyectos totales:', 'Inversión Total:', 'Proy. Inversión:', 'IOARR:', 'Coord. Oficiales:', 'Coord. Aproximadas:'],
+            localize=True
+        ),
+        show=False
+    ).add_to(m)
+    
 
 
     legend_html = '''
