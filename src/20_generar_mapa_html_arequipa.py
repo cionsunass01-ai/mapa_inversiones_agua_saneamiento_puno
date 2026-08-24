@@ -11,6 +11,7 @@ CSV_FILE = Path("outputs/proyectos_agua_saneamiento_arequipa_v1.csv")
 GPKG_FILE = Path("data/geografia/DISTRITO.gpkg")
 EPS_SHP = Path("/Users/pierotarazona/Downloads/Rodrigo_Puno y Arequipa/EPS_Arequipa.shp")
 HTML_OUT = Path("outputs/mapa_inversiones_agua_saneamiento_arequipa.html")
+EXCEL_HORARIO = Path("/Users/pierotarazona/Downloads/Horario Arequipa.xlsx")
 
 def format_money(val):
     if pd.isna(val) or val == '' or str(val).lower() == 'nan': return "Sin información"
@@ -238,6 +239,155 @@ def main():
         ),
         show=False
     ).add_to(m)
+
+    # --- INICIO LÓGICA CONTINUIDAD Y VORONOI ---
+    print("Cargando datos de continuidad...")
+    if EXCEL_HORARIO.exists():
+        df_horario = pd.read_excel(EXCEL_HORARIO)
+        agg_horario = df_horario.groupby(['nombre', 'grupo', 'latitud', 'longitud', 'SECTOR', 'LOCALIDAD'], dropna=False).agg(
+            HorasPrometidasSemana=('ServicioPrometido', 'sum')
+        ).reset_index()
+        
+        agg_horario['HorasPromedioDia'] = (agg_horario['HorasPrometidasSemana'] / 7).round(1)
+        
+        fg_continuidad = folium.FeatureGroup(name='Puntos de Continuidad (Horario)', show=True)
+        
+        for _, row in agg_horario.iterrows():
+            lat = row['latitud']
+            lon = row['longitud']
+            
+            if pd.isna(lat) or pd.isna(lon):
+                continue
+                
+            popup_html = f"""
+            <div style="font-family: Arial; font-size: 12px; width: 220px;">
+                <h4 style="margin: 0 0 5px 0; color: #2980b9;">{row['nombre']}</h4>
+                <b>Grupo:</b> {row['grupo']}<br>
+                <b>Sector:</b> {row['SECTOR']}<br>
+                <b>Localidad:</b> {row['LOCALIDAD']}<br>
+                <hr style="margin: 5px 0;">
+                <b style="color: #27ae60;">Horas promedio/día:</b> {row['HorasPromedioDia']} h
+            </div>
+            """
+            
+            folium.Marker(
+                location=[lat, lon],
+                popup=folium.Popup(popup_html, max_width=250),
+                tooltip=f"{row['nombre']} - {row['HorasPromedioDia']} hrs/día",
+                icon=folium.Icon(color='blue', icon='tint', prefix='fa')
+            ).add_to(fg_continuidad)
+            
+        fg_continuidad.add_to(m)
+
+        # Generar capa de Voronoi (Polígonos de Continuidad) relativos a cada EPS
+        from shapely.geometry import Point, MultiPoint
+        from shapely.ops import voronoi_diagram
+        
+        eps_polygons = gdf_eps.dissolve(by='EPS').reset_index()
+        
+        # Asignar cada punto a su EPS más cercano
+        points_data = []
+        for _, row in agg_horario.iterrows():
+            if not pd.isna(row['latitud']) and not pd.isna(row['longitud']):
+                pt = Point(row['longitud'], row['latitud'])
+                min_dist = float('inf')
+                best_eps = None
+                for _, eps_row in eps_polygons.iterrows():
+                    dist = eps_row.geometry.distance(pt)
+                    if dist < min_dist:
+                        min_dist = dist
+                        best_eps = eps_row['EPS']
+                points_data.append((pt, row, best_eps))
+                
+        voronoi_features = []
+        for _, eps_row in eps_polygons.iterrows():
+            eps_geom = eps_row.geometry
+            eps_name = eps_row['EPS']
+            
+            pts_in_eps = [item for item in points_data if item[2] == eps_name]
+            if not pts_in_eps:
+                continue
+                
+            points_list = [item[0] for item in pts_in_eps]
+            data_in_eps = [item[1] for item in pts_in_eps]
+            
+            horas = [r['HorasPromedioDia'] for r in data_in_eps]
+            min_h, max_h = min(horas), max(horas)
+            
+            if len(points_list) == 1:
+                geoms_to_add = [eps_geom] if eps_geom.geom_type == 'Polygon' else list(eps_geom.geoms)
+                for g in geoms_to_add:
+                    voronoi_features.append({
+                        'type': 'Feature',
+                        'geometry': g.__geo_interface__,
+                        'properties': {
+                            'HorasPromedioDia': float(data_in_eps[0]['HorasPromedioDia']),
+                            'Relativo': 1.0
+                        }
+                    })
+            else:
+                mp = MultiPoint(points_list)
+                regions = voronoi_diagram(mp, envelope=eps_geom)
+                
+                for poly in regions.geoms:
+                    clipped = poly.intersection(eps_geom)
+                    if clipped.is_empty:
+                        continue
+                        
+                    matched_row = None
+                    for pt, data in zip(points_list, data_in_eps):
+                        if poly.contains(pt) or poly.distance(pt) < 1e-6:
+                            matched_row = data
+                            break
+                            
+                    if matched_row is not None:
+                        val = matched_row['HorasPromedioDia']
+                        rel_val = 1.0 if min_h == max_h else (val - min_h) / (max_h - min_h)
+                        
+                        geoms_to_add = [clipped] if clipped.geom_type == 'Polygon' else (list(clipped.geoms) if clipped.geom_type == 'MultiPolygon' else [])
+                        for g in geoms_to_add:
+                            voronoi_features.append({
+                                'type': 'Feature',
+                                'geometry': g.__geo_interface__,
+                                'properties': {
+                                    'HorasPromedioDia': float(val),
+                                    'Relativo': float(rel_val)
+                                }
+                            })
+                            
+        if voronoi_features:
+            voronoi_geojson = {'type': 'FeatureCollection', 'features': voronoi_features}
+            
+            voronoi_cmap = cm.LinearColormap(
+                colors=['red', 'yellow', 'green'],
+                vmin=0.0,
+                vmax=1.0
+            )
+            voronoi_cmap.caption = 'Continuidad Relativa por EPS (0=Mínimo, 1=Máximo)'
+            
+            def voronoi_style(feature):
+                rel_val = feature['properties']['Relativo']
+                col = voronoi_cmap(rel_val)
+                return {
+                    'fillColor': col,
+                    'color': 'black',
+                    'weight': 1,
+                    'fillOpacity': 0.4
+                }
+                
+            folium.GeoJson(
+                voronoi_geojson,
+                name='Áreas de Continuidad (Voronoi Relativo)',
+                style_function=voronoi_style,
+                tooltip=folium.GeoJsonTooltip(
+                    fields=['HorasPromedioDia'],
+                    aliases=['Horas Promedio/Día:'],
+                    localize=True
+                ),
+                show=False
+            ).add_to(m)
+            voronoi_cmap.add_to(m)
+    # --- FIN LÓGICA CONTINUIDAD Y VORONOI ---
 
     legend_html = '''
     <div style="position: fixed; bottom: 50px; left: 50px; width: 280px; height: 120px; 
