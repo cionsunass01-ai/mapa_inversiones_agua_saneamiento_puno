@@ -408,30 +408,15 @@ def main():
         
     top_proy_html = "".join([f"<li>{get_dist_name(u)} — {int(p)} proy.</li>" for u, p in zip(top_proy['UBIGEO_NORMALIZADO'], top_proy['TOTAL_PROYECTOS'])])
 
-    # Panel General superpuesto con EPS info
+    # Panel General superpuesto
     panel_html = f'''
-    <div style="position: fixed; top: 10px; left: 60px; width: 320px; 
-         background-color: rgba(255, 255, 255, 0.95); border:2px solid grey; z-index:9999; font-size:12px; padding: 10px; font-family: Arial; max-height: 90vh; overflow-y: auto;">
-         <h4 style="margin-top:0; font-size:14px; text-align:center;">Agua y Saneamiento (Arequipa)</h4>
+    <div style="position: fixed; bottom: 190px; left: 50px; width: 280px; 
+         background-color: rgba(255, 255, 255, 0.95); border:2px solid grey; z-index:9999; font-size:12px; padding: 10px; font-family: Arial; box-sizing: border-box;">
+         <h4 style="margin-top:0; font-size:14px; text-align:center; color: #2c3e50;">Agua y Saneamiento (Arequipa)</h4>
          <hr style="margin:5px 0;">
          <b>Total de proyectos:</b> {TOTAL_PROY}<br>
          <b>Inversión total referencial:</b> {format_money(TOTAL_MONTO)}<br>
-         <b>Presupuesto ejecutado acumulado:</b> {format_money(TOTAL_EJECUTADO)}<br>
-         <hr style="margin:5px 0;">
-         <b style="color:#2c3e50;">Ámbito de Prestación (EPS)</b><br>
-         <span>● Total EPS identificadas:</span> {CANT_EPS}<br>
-         <span>● Proyectos DENTRO de EPS:</span> <b style="color:#27ae60;">{DENTRO_EPS}</b><br>
-         <span>● Proyectos FUERA de EPS:</span> <b style="color:#e74c3c;">{FUERA_EPS}</b><br>
-         <hr style="margin:5px 0;">
-         <b style="color:#2c3e50;">Vigencia del Avance Físico</b><br>
-         <span style="color:#27ae60;">● Actualizados:</span> {G_ACT}<br>
-         <span style="color:#e67e22;">● Desactualizados:</span> {G_DES}<br>
-         <span style="color:#7f8c8d;">● Sin fecha reporte:</span> {G_SFR}<br>
-         <span style="color:#bdc3c7;">● Sin avance físico:</span> {G_SAF}<br>
-         <b>Fecha de reporte más reciente:</b> {f_rec}<br>
-         <hr style="margin:5px 0;">
-         <b>Top 5 por cantidad de proyectos:</b>
-         <ol style="margin-top:5px; margin-bottom:5px; padding-left:25px;">{top_proy_html}</ol>
+         <b>Presupuesto ejecutado acumulado:</b> {format_money(TOTAL_EJECUTADO)}
     </div>
     '''
     m.get_root().html.add_child(folium.Element(panel_html))
