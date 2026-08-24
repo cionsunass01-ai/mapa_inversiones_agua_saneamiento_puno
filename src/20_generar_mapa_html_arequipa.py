@@ -42,11 +42,6 @@ def main():
     gdf_eps = gpd.read_file(EPS_SHP)
     if gdf_eps.crs is None or gdf_eps.crs.to_epsg() != 4326:
         gdf_eps = gdf_eps.to_crs(epsg=4326)
-    
-    # Forzar a 2D para evitar problemas de visualización en Leaflet y recortes de Voronoi
-    from shapely import force_2d
-    gdf_eps['geometry'] = gdf_eps.geometry.apply(force_2d)
-    
     gdf_eps = gdf_eps[['Pres_Sigla', 'geometry']].rename(columns={'Pres_Sigla': 'EPS'})
     
     df['COSTO_ACTUALIZADO'] = pd.to_numeric(df['COSTO_ACTUALIZADO'], errors='coerce')
@@ -284,89 +279,53 @@ def main():
             
         fg_continuidad.add_to(m)
 
-        # Generar capa de Voronoi (Polígonos de Continuidad) relativos a cada EPS
+        # Generar capa de Voronoi (Polígonos de Continuidad) relativos a todo Arequipa
         from shapely.geometry import Point, MultiPoint
         from shapely.ops import voronoi_diagram
         
-        eps_polygons = gdf_eps.dissolve(by='EPS').reset_index()
+        arequipa_geom = gdf_arequipa.unary_union
         
-        # Asignar cada punto a su EPS más cercano
-        points_data = []
+        points_list = []
+        data_list = []
         for _, row in agg_horario.iterrows():
             if not pd.isna(row['latitud']) and not pd.isna(row['longitud']):
-                pt = Point(row['longitud'], row['latitud'])
-                min_dist = float('inf')
-                best_eps = None
-                for _, eps_row in eps_polygons.iterrows():
-                    dist = eps_row.geometry.distance(pt)
-                    if dist < min_dist:
-                        min_dist = dist
-                        best_eps = eps_row['EPS']
-                points_data.append((pt, row, best_eps))
+                points_list.append(Point(row['longitud'], row['latitud']))
+                data_list.append(row)
                 
         voronoi_features = []
-        for _, eps_row in eps_polygons.iterrows():
-            eps_geom = eps_row.geometry
-            eps_name = eps_row['EPS']
-            
-            pts_in_eps = [item for item in points_data if item[2] == eps_name]
-            if not pts_in_eps:
-                continue
-                
-            points_list = [item[0] for item in pts_in_eps]
-            data_in_eps = [item[1] for item in pts_in_eps]
-            
-            horas = [r['HorasPromedioDia'] for r in data_in_eps]
+        
+        if len(points_list) > 1:
+            horas = [r['HorasPromedioDia'] for r in data_list]
             min_h, max_h = min(horas), max(horas)
             
-            if len(points_list) == 1:
-                # bounding_geom para que no sea un punto invisible
-                bounding_geom = points_list[0].buffer(0.01)
-                clip_geom = eps_geom.union(bounding_geom)
-                geoms_to_add = [clip_geom] if clip_geom.geom_type == 'Polygon' else list(clip_geom.geoms)
-                for g in geoms_to_add:
-                    voronoi_features.append({
-                        'type': 'Feature',
-                        'geometry': g.__geo_interface__,
-                        'properties': {
-                            'HorasPromedioDia': float(data_in_eps[0]['HorasPromedioDia']),
-                            'Relativo': 1.0
-                        }
-                    })
-            else:
-                mp = MultiPoint(points_list)
-                # Como el shapefile de Arequipa tiene poligonos muy pequeños, 
-                # usamos la envolvente convexa de los puntos con un buffer de ~1km para recortar.
-                bounding_geom = mp.convex_hull.buffer(0.01)
-                clip_geom = eps_geom.union(bounding_geom)
-                
-                regions = voronoi_diagram(mp, envelope=clip_geom)
-                
-                for poly in regions.geoms:
-                    clipped = poly.intersection(clip_geom)
-                    if clipped.is_empty:
-                        continue
+            mp = MultiPoint(points_list)
+            regions = voronoi_diagram(mp, envelope=arequipa_geom)
+            
+            for poly in regions.geoms:
+                clipped = poly.intersection(arequipa_geom)
+                if clipped.is_empty:
+                    continue
+                    
+                matched_row = None
+                for pt, data in zip(points_list, data_list):
+                    if poly.contains(pt) or poly.distance(pt) < 1e-6:
+                        matched_row = data
+                        break
                         
-                    matched_row = None
-                    for pt, data in zip(points_list, data_in_eps):
-                        if poly.contains(pt) or poly.distance(pt) < 1e-6:
-                            matched_row = data
-                            break
-                            
-                    if matched_row is not None:
-                        val = matched_row['HorasPromedioDia']
-                        rel_val = 1.0 if min_h == max_h else (val - min_h) / (max_h - min_h)
-                        
-                        geoms_to_add = [clipped] if clipped.geom_type == 'Polygon' else (list(clipped.geoms) if clipped.geom_type == 'MultiPolygon' else [])
-                        for g in geoms_to_add:
-                            voronoi_features.append({
-                                'type': 'Feature',
-                                'geometry': g.__geo_interface__,
-                                'properties': {
-                                    'HorasPromedioDia': float(val),
-                                    'Relativo': float(rel_val)
-                                }
-                            })
+                if matched_row is not None:
+                    val = matched_row['HorasPromedioDia']
+                    rel_val = 1.0 if min_h == max_h else (val - min_h) / (max_h - min_h)
+                    
+                    geoms_to_add = [clipped] if clipped.geom_type == 'Polygon' else (list(clipped.geoms) if clipped.geom_type == 'MultiPolygon' else [])
+                    for g in geoms_to_add:
+                        voronoi_features.append({
+                            'type': 'Feature',
+                            'geometry': g.__geo_interface__,
+                            'properties': {
+                                'HorasPromedioDia': float(val),
+                                'Relativo': float(rel_val)
+                            }
+                        })
                             
         if voronoi_features:
             voronoi_geojson = {'type': 'FeatureCollection', 'features': voronoi_features}
